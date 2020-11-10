@@ -48,6 +48,7 @@ def initialize(
     bokeh_worker_port : int
         Worker's Bokeh port for visual diagnostics
     """
+    print("==> initialize")
     from mpi4py import MPI
 
     comm = MPI.COMM_WORLD
@@ -55,7 +56,7 @@ def initialize(
     loop = IOLoop.current()
 
     if rank == 0:
-
+        print("==> rank 0")
         async def run_scheduler():
             async with Scheduler(
                 interface=interface,
@@ -75,7 +76,18 @@ def initialize(
         comm.Barrier()
 
     if rank == 1:
+        print("==> rank 1")
+        c = Client()
+        def send_close_signal():
+            async def stop(dask_scheduler):
+                await dask_scheduler.close()
+                await gen.sleep(0.1)
+                local_loop = dask_scheduler.loop
+                local_loop.add_callback(local_loop.stop)
+
+            c.run_on_scheduler(stop, wait=False)
         atexit.register(send_close_signal)
+        return c
     else:
 
         async def run_worker():
@@ -88,18 +100,8 @@ def initialize(
                 local_dir=local_directory,
                 name=rank,
             ) as worker:
+                print('==> worker address', worker.address)
                 await worker.finished()
 
         asyncio.get_event_loop().run_until_complete(run_worker())
         sys.exit()
-
-
-def send_close_signal():
-    async def stop(dask_scheduler):
-        await dask_scheduler.close()
-        await gen.sleep(0.1)
-        local_loop = dask_scheduler.loop
-        local_loop.add_callback(local_loop.stop)
-
-    with Client() as c:
-        c.run_on_scheduler(stop, wait=False)
